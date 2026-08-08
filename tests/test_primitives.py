@@ -4,7 +4,7 @@ import unittest
 
 from escapement.belief.labels import UNKNOWN, BeliefLabel, Decisiveness, contracted, update
 from escapement.capabilities.models import Capability, CapabilityKind
-from escapement.evidence.models import Evidence
+from escapement.evidence.models import Evidence, EvidenceKind
 from escapement.intent.models import Intent
 from escapement.policy.models import Invariant, Policy, Zone
 from escapement.state.models import Belief, BeliefState, Observation, ObservedState
@@ -215,6 +215,7 @@ class EvidenceTest(unittest.TestCase):
     def test_evidence_records_its_provenance(self) -> None:
         evidence = Evidence(
             id="e1",
+            kind=EvidenceKind.EXECUTION,
             claim="repository contains 14 separable modules",
             source="dependency_inspector",
             produced_by="INSPECT_DEPENDENCY_MAP",
@@ -225,7 +226,9 @@ class EvidenceTest(unittest.TestCase):
     def test_evidence_defaults_to_non_decisive(self) -> None:
         """Decisiveness must be claimed deliberately, since it unlocks
         multi-step belief movement."""
-        evidence = Evidence(id="e1", claim="looks modular", source="glance")
+        evidence = Evidence(
+            id="e1", kind=EvidenceKind.BEHAVIOURAL, claim="looks modular", source="glance"
+        )
         self.assertFalse(evidence.decisive)
 
 

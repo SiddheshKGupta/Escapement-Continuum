@@ -19,8 +19,12 @@ method anywhere that promotes a Belief into an Observation -- Experiment
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from escapement.belief.labels import UNKNOWN, BeliefLabel
+
+if TYPE_CHECKING:  # import only for typing, to keep the dependency one-way
+    from escapement.evidence.models import Evidence
 
 
 @dataclass(frozen=True)
@@ -36,6 +40,19 @@ class Observation:
     subject: str
     value: object
     evidence_id: str
+
+    @classmethod
+    def derive(cls, evidence: "Evidence", *, id: str, subject: str, value: object) -> "Observation":
+        """Admit a fact from an evidence record.
+
+        The only intended construction path. Taking the whole Evidence
+        object rather than a bare id makes the derivation direction
+        (evidence -> observation) explicit in the call site, so mutation
+        M3 -- writing an observation without intervening evidence -- has
+        to be a visible edit rather than an omission that looks like
+        ordinary code.
+        """
+        return cls(id=id, subject=subject, value=value, evidence_id=evidence.id)
 
 
 @dataclass(frozen=True)

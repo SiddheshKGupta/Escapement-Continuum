@@ -13,6 +13,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:  # typing only, so the dependency stays one-way
+    from escapement.information.action import InformationAction
 
 
 class CapabilityKind(Enum):
@@ -35,12 +39,51 @@ class CapabilityKind(Enum):
 class Capability:
     """Something that can act or inform.
 
-    No cost or reliability fields yet. Foundations section 12 defers
+    No reliability or latency fields yet. Foundations section 12 defers
     anything needing empirical magnitudes until there is data; a
     hand-typed `reliability=0.8` would be invented precision, and the
     system would then optimise against a number nobody measured.
+
+    `provides` is the exception, and it is not a magnitude. It is the
+    binding an independent review found missing: baseline section 12
+    lists information actions, section 5.3 lists capability kinds, and
+    nothing connects them. Criterion 3 needs three distinct EVI figures,
+    EVI subtracts acquisition cost, and cost comes from whatever performs
+    the action -- so without this declaration the figures could only be
+    hardcoded.
     """
 
     id: str
     kind: CapabilityKind
     description: str
+    #: Ids of the information actions this capability can perform.
+    provides: tuple[str, ...] = ()
+
+    def can_perform(self, action_id: str) -> bool:
+        return action_id in self.provides
+
+
+def validate_bindings(
+    capabilities: dict[str, Capability], actions: dict[str, "InformationAction"]
+) -> list[str]:
+    """Check every action names a capability that claims to provide it.
+
+    Returns a list of problems, empty when consistent. The binding is
+    declared on both sides on purpose -- an action names its performer,
+    and a capability lists what it performs -- because a one-sided
+    declaration can drift silently. Checking that they agree turns a
+    latent inconsistency into a startup failure.
+    """
+    problems: list[str] = []
+    for action in actions.values():
+        capability = capabilities.get(action.capability_id)
+        if capability is None:
+            problems.append(
+                f"action {action.id} names unknown capability {action.capability_id!r}"
+            )
+        elif not capability.can_perform(action.id):
+            problems.append(
+                f"action {action.id} names capability {capability.id!r}, "
+                f"which does not list it in `provides`"
+            )
+    return problems
