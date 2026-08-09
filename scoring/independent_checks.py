@@ -1,7 +1,7 @@
 """Independent executable checks for the Experiment 001 review contract.
 
 Written without reading the author's own checker (since deleted) or
-`tests/test_experiment_001.py`, deliberately: both were authored by the
+`tests/test_c001_conformance.py`, deliberately: both were authored by the
 author of the implementation and both were found to contain assertions
 that hold while the contract is violated. The value of this module is
 that it is not anchored on those assertions.
@@ -61,8 +61,8 @@ from escapement.observation.events import (  # noqa: E402
     load,
 )
 
-TRACE_PATH = _REPO_ROOT / "experiments" / "_001" / "events.jsonl"
-README_PATH = _REPO_ROOT / "experiments" / "_001" / "README.md"
+TRACE_PATH = _REPO_ROOT / "conformance" / "c001" / "events.jsonl"
+README_PATH = _REPO_ROOT / "conformance" / "c001" / "README.md"
 
 #: Criterion 1 names these three explicitly.
 REQUIRED_STRATEGY_IDS = frozenset({"DIRECT", "SEQUENTIAL", "RECURSIVE"})
