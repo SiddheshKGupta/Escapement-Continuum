@@ -58,6 +58,36 @@ class EvidenceKind(Enum):
 
 
 @dataclass(frozen=True)
+class Interpretation:
+    """What a piece of evidence means for a proposition.
+
+    Added after an independent review found the fatal defect in v0.1: the
+    loop moved every belief `+1` regardless of what the evidence said.
+    Evidence stating the repository was a tightly-coupled monolith drove
+    the belief that it was *modular* to ESTABLISHED and still committed
+    RECURSIVE. The chain transported the *existence* of evidence and
+    never its *content*, which is contract clause A7 -- the right
+    destination reached with no path.
+
+    `supports` is the fix. +1 means the evidence supports the world
+    proposition, -1 means it undermines it. Without this the direction is
+    a constant, and `BeliefLabel.update` accepting -1 is unreachable.
+    """
+
+    subject: str
+    value: object
+    supports: int
+
+    def __post_init__(self) -> None:
+        if self.supports not in (-1, 1):
+            raise ValueError(
+                f"supports must be +1 or -1, got {self.supports!r}; evidence "
+                "that neither supports nor undermines a proposition should "
+                "not produce an interpretation at all"
+            )
+
+
+@dataclass(frozen=True)
 class Evidence:
     """A raw record of what actually happened, with its origin.
 

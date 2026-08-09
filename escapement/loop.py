@@ -31,7 +31,7 @@ from typing import Callable, Protocol
 
 from escapement.belief.labels import BeliefLabel, Decisiveness, update
 from escapement.capabilities.models import Capability, validate_bindings
-from escapement.evidence.models import Evidence
+from escapement.evidence.models import Evidence, Interpretation
 from escapement.information.action import InformationAction
 from escapement.information.value import InformationValue, best_action, stop_exploring
 from escapement.jtms.core import JTMS
@@ -76,9 +76,14 @@ def run_episode(
     strategies: list[Strategy],
     perform: Performs,
     evaluate_value: Callable[[InformationAction, BeliefState], InformationValue],
-    interpret: Callable[[Evidence], tuple[str, object]],
+    interpret: Callable[[Evidence], Interpretation],
     world_belief_of: Callable[[str], str],
-    strategy_belief_of: Callable[[str], str | None],
+    #: Maps a world-belief id to the strategies it bears on, each with a
+    #: correlation of +1 (this proposition favours the strategy) or -1
+    #: (it disfavours it). Returning correlations rather than a single
+    #: strategy name is what lets one observation strengthen one route
+    #: while weakening another.
+    strategy_belief_of: Callable[[str], tuple[tuple[str, int], ...]],
     proceed_return: int,
     trace: EventTrace,
     max_rounds: int = 5,
@@ -215,7 +220,8 @@ def run_episode(
         last_evidence_seq = evidence_event.seq
 
         # Criterion 5: evidence creates an observation, never a belief.
-        subject, value = interpret(evidence)
+        interpretation = interpret(evidence)
+        subject, value = interpretation.subject, interpretation.value
         observation = Observation.derive(
             evidence, id=f"obs:{evidence.id}", subject=subject, value=value
         )
@@ -230,7 +236,10 @@ def run_episode(
             rationale=f"{subject} = {value} (evidence {evidence.id})",
         )
 
-        # Criterion 6: a world belief moves, caused by the observation.
+        # Criterion 6: a world belief moves, caused by the observation,
+        # *in the direction the evidence actually points*. The direction
+        # comes from interpretation.supports, not from a constant -- see
+        # Interpretation's docstring for the defect this replaced.
         world_id = world_belief_of(subject)
         before = beliefs.get(world_id) or Belief(
             id=world_id, kind="WorldBelief", proposition=world_id
@@ -238,15 +247,16 @@ def run_episode(
         after = before.with_label(
             update(
                 before.label,
-                +1,
+                interpretation.supports,
                 Decisiveness.DECISIVE if evidence.decisive else Decisiveness.ORDINARY,
             )
         )
         beliefs.hold(after)
+        direction_word = "supports" if interpretation.supports > 0 else "undermines"
         jtms.justify(
             f"belief:{world_id}",
             in_list=[f"observed:{observation.id}"],
-            rationale=f"{subject} supports {after.proposition}",
+            rationale=f"{subject}={value!r} {direction_word} {after.proposition}",
         )
         world_event = trace.emit(
             "BELIEF_UPDATED",
@@ -255,30 +265,39 @@ def run_episode(
                 "kind": "WorldBelief",
                 "before": str(before.label),
                 "after": str(after.label),
+                "direction": interpretation.supports,
             },
             caused_by=(observation_event.seq,),
-            rationale=f"observation {observation.id} supports this interpretation",
+            rationale=(
+                f"observation {observation.id} ({subject}={value!r}) "
+                f"{direction_word} this proposition"
+            ),
         )
         last_belief_seq = world_event.seq
 
-        # Criterion 7: a strategy belief moves, caused by the *world
-        # belief*, not by the raw observation. This is the assertion that
-        # the loop is reasoning rather than transcribing.
-        target_strategy = strategy_belief_of(world_id)
-        sb_id = f"belief:strategy:{target_strategy}" if target_strategy else None
-        # A world belief can point at a strategy that is not in this
-        # episode's ensemble -- found by mutation M5, which runs with a
-        # single strategy while the mapping still names RECURSIVE. That
-        # is not an error: you cannot update a belief about a route you
-        # are not considering. Skip rather than crash.
-        if sb_id is not None and beliefs.get(sb_id) is not None:
+        # Criterion 7: strategy beliefs move, caused by the *world
+        # belief*, not by the raw observation. Each affected strategy
+        # declares how it correlates with the proposition, so the same
+        # evidence can strengthen one route and weaken another -- which
+        # is what makes the commitment depend on what was learned rather
+        # than merely that something was learned.
+        for target_strategy, correlation in strategy_belief_of(world_id):
+            sb_id = f"belief:strategy:{target_strategy}"
+            # A world belief can name a strategy absent from this
+            # episode's ensemble -- found by mutation M5. Not an error:
+            # you cannot update a belief about a route you are not
+            # considering. Skip rather than crash.
             sb_before = beliefs.get(sb_id)
-            sb_after = sb_before.with_label(update(sb_before.label, +1))
+            if sb_before is None:
+                continue
+            step = interpretation.supports * correlation
+            sb_after = sb_before.with_label(update(sb_before.label, step))
             beliefs.hold(sb_after)
+            effect = "raises" if step > 0 else "lowers"
             jtms.justify(
                 sb_id,
                 in_list=[f"belief:{world_id}"],
-                rationale=f"{world_id} raises confidence in {target_strategy}",
+                rationale=f"{world_id} {effect} confidence in {target_strategy}",
             )
             last_belief_seq = trace.emit(
                 "BELIEF_UPDATED",
@@ -288,11 +307,13 @@ def run_episode(
                     "strategy_id": target_strategy,
                     "before": str(sb_before.label),
                     "after": str(sb_after.label),
+                    "direction": step,
                 },
                 caused_by=(world_event.seq,),
                 rationale=(
-                    f"the world belief {world_id} changed, which changes how "
-                    f"promising {target_strategy} is"
+                    f"the world belief {world_id} moved "
+                    f"{'up' if interpretation.supports > 0 else 'down'}, which "
+                    f"{effect} how promising {target_strategy} is"
                 ),
             ).seq
 

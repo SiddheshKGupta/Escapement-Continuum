@@ -15,10 +15,11 @@ would not improve the verdict.
 from __future__ import annotations
 
 from escapement.capabilities.models import Capability, CapabilityKind
-from escapement.evidence.models import Evidence, EvidenceKind
+from escapement.evidence.models import Evidence, EvidenceKind, Interpretation
 from escapement.information.action import ActionKind, InformationAction
 from escapement.information.value import InformationValue
 from escapement.intent.models import Intent
+from escapement.belief.labels import BeliefLabel
 from escapement.state.models import BeliefState
 from escapement.strategy.models import Reversibility, Strategy
 
@@ -114,6 +115,7 @@ _EVIDENCE = {
         source="dependency_inspector",
         produced_by="INSPECT_DEPENDENCY_MAP",
         decisive=True,
+        payload={"module_count": _TRUTH_MODULE_COUNT},
     ),
     "INSPECT_REPO_SIZE": Evidence(
         id="e_size",
@@ -129,6 +131,7 @@ _EVIDENCE = {
         source="architect",
         produced_by="ASK_ARCHITECT",
         decisive=True,
+        payload={"opinion": "modular"},
     ),
 }
 
@@ -145,8 +148,18 @@ def evaluate_value(action: InformationAction, beliefs: BeliefState) -> Informati
     (skip the second round) and a hardcoded threshold both fail against
     this.
     """
+    # "Known" means the belief has reached an extreme in *either*
+    # direction. Checking only `>= ESTABLISHED` was a real bug, exposed
+    # the moment evidence could push a belief downward: a repository
+    # confidently known to be a monolith left the belief at RULED_OUT,
+    # which scored as still-unknown, so the loop re-gathered the same
+    # evidence every round until max_rounds. Certainty that something is
+    # false is certainty.
     modularity = beliefs.get("belief:world:modularity")
-    already_known = modularity is not None and int(modularity.label) >= 4
+    already_known = modularity is not None and modularity.label in (
+        BeliefLabel.ESTABLISHED,
+        BeliefLabel.RULED_OUT,
+    )
 
     base = {
         "INSPECT_DEPENDENCY_MAP": 5,
@@ -159,12 +172,36 @@ def evaluate_value(action: InformationAction, beliefs: BeliefState) -> Informati
     )
 
 
-def interpret(evidence: Evidence) -> tuple[str, object]:
+#: Above this, a repository is treated as decomposable. A fixture
+#: constant, not a tuned parameter -- it exists so that `supports` is
+#: derived from the observed value rather than asserted.
+MODULARITY_THRESHOLD = 3
+
+
+def interpret(evidence: Evidence) -> Interpretation:
+    """Turn evidence into a fact *and* a direction.
+
+    The direction is computed from the observed value. This is the half
+    of the fix that makes evidence content load-bearing: a dependency map
+    reporting one monolithic module now yields supports=-1 and drives the
+    modularity belief down, where previously every observation moved it
+    up regardless of what it said.
+    """
     if evidence.id == "e_depmap":
-        return "module_count", _TRUTH_MODULE_COUNT
+        modules = evidence.payload.get("module_count", _TRUTH_MODULE_COUNT)
+        return Interpretation(
+            subject="module_count",
+            value=modules,
+            supports=1 if modules > MODULARITY_THRESHOLD else -1,
+        )
     if evidence.id == "e_size":
-        return "file_count", 812
-    return "architect_opinion", "modular"
+        return Interpretation(subject="file_count", value=812, supports=1)
+    opinion = evidence.payload.get("opinion", "modular")
+    return Interpretation(
+        subject="architect_opinion",
+        value=opinion,
+        supports=1 if opinion == "modular" else -1,
+    )
 
 
 def world_belief_of(subject: str) -> str:
@@ -175,14 +212,22 @@ def world_belief_of(subject: str) -> str:
     }[subject]
 
 
-def strategy_belief_of(world_belief_id: str) -> str | None:
-    """Modularity is what makes recursion attractive. Size is not.
+def strategy_belief_of(world_belief_id: str) -> tuple[tuple[str, int], ...]:
+    """Which strategies modularity bears on, and in which direction.
 
-    Returning None for size matters: it proves the strategy belief moves
-    because of *what was learned*, not merely because something was
-    learned.
+    RECURSIVE correlates positively with modularity; DIRECT correlates
+    negatively, because a single pass suits a tightly-coupled monolith
+    and suits a decomposable system badly. Encoding both is what makes
+    the commitment depend on what the evidence said: the same observation
+    now strengthens one route while weakening the other.
+
+    Size bears on neither, and returning an empty tuple for it matters --
+    it proves strategy beliefs move because of *what* was learned, not
+    merely because something was learned.
     """
-    return "RECURSIVE" if world_belief_id == "belief:world:modularity" else None
+    if world_belief_id == "belief:world:modularity":
+        return (("RECURSIVE", 1), ("DIRECT", -1))
+    return ()
 
 
 #: The return of simply proceeding. Compared against EVI by the Marginal

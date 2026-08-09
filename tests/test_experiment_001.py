@@ -208,7 +208,7 @@ class MutationTest(unittest.TestCase):
     def test_m3_belief_without_observation_breaks_the_chain(self) -> None:
         """Criterion 7 requires the strategy belief to descend from a
         world belief. Severing the world->strategy mapping breaks it."""
-        result = run(strategy_belief_of=lambda _world_id: None)
+        result = run(strategy_belief_of=lambda _world_id: ())
         strategy_updates = [
             e for e in result.trace.of_type("BELIEF_UPDATED")
             if e.payload["kind"] == "StrategyBelief"
@@ -238,6 +238,107 @@ class MutationTest(unittest.TestCase):
         forward = run().trace.render()
         reversed_input = run(strategies=list(reversed(scenario.STRATEGIES))).trace.render()
         self.assertEqual(forward, reversed_input)
+
+    def test_a7_inverted_evidence_produces_a_different_commitment(self) -> None:
+        """The test that should have existed from the start.
+
+        An independent scorer failed Experiment 001 on clause A7 by
+        replacing the dependency map's finding with its opposite and
+        observing that the run still committed RECURSIVE on an unchanged
+        causal path. The loop hardcoded the belief direction to +1 and
+        never read the observed value, so the whole chain transported the
+        *existence* of evidence and never its *content*.
+
+        My original A6 test missed this: it swapped the world_belief_of
+        mapping rather than the evidence content, exercising the one
+        dimension that happened to be wired up. This swaps the content,
+        which is the thing that has to matter.
+        """
+        from escapement.evidence.models import Evidence, EvidenceKind
+
+        def monolith(action):
+            if action.id != "INSPECT_DEPENDENCY_MAP":
+                return scenario.perform(action)
+            return Evidence(
+                id="e_depmap",
+                kind=EvidenceKind.EXECUTION,
+                claim="the repository is 1 monolithic module with deep circular coupling",
+                source="dependency_inspector",
+                produced_by="INSPECT_DEPENDENCY_MAP",
+                decisive=True,
+                payload={"module_count": 1},
+            )
+
+        modular = run().commitment
+        monolithic = run(perform=monolith).commitment
+
+        self.assertEqual(modular.strategy_id, "RECURSIVE")
+        self.assertEqual(monolithic.strategy_id, "DIRECT")
+        self.assertNotEqual(modular.strategy_id, monolithic.strategy_id)
+
+    def test_contradictory_evidence_drives_a_belief_down(self) -> None:
+        """Direction must be readable from the trace, not inferred.
+
+        `BeliefLabel.update` has always accepted -1; before this fix no
+        call site could ever produce it, so half the type was unreachable.
+        """
+        from escapement.evidence.models import Evidence, EvidenceKind
+
+        def monolith(action):
+            if action.id != "INSPECT_DEPENDENCY_MAP":
+                return scenario.perform(action)
+            return Evidence(
+                id="e_depmap",
+                kind=EvidenceKind.EXECUTION,
+                claim="1 monolithic module",
+                source="dependency_inspector",
+                produced_by="INSPECT_DEPENDENCY_MAP",
+                decisive=True,
+                payload={"module_count": 1},
+            )
+
+        result = run(perform=monolith)
+        world = next(
+            e for e in result.trace.of_type("BELIEF_UPDATED")
+            if e.payload["kind"] == "WorldBelief"
+        )
+        self.assertEqual(world.payload["direction"], -1)
+        self.assertEqual(world.payload["after"], "RULED_OUT")
+
+    def test_same_evidence_moves_two_strategies_in_opposite_directions(self) -> None:
+        """Modularity favours RECURSIVE and disfavours DIRECT. If one
+        observation could only ever push in one direction, the ensemble
+        would be decorative."""
+        result = run()
+        moves = {
+            e.payload["strategy_id"]: e.payload["direction"]
+            for e in result.trace.of_type("BELIEF_UPDATED")
+            if e.payload["kind"] == "StrategyBelief"
+        }
+        self.assertEqual(moves["RECURSIVE"], 1)
+        self.assertEqual(moves["DIRECT"], -1)
+
+    def test_certainty_in_either_direction_stops_exploration(self) -> None:
+        """Exposed by the D1 fix: 'already known' checked only for
+        ESTABLISHED, so a belief driven to RULED_OUT scored as unknown and
+        the loop re-gathered identical evidence every round until
+        max_rounds. Certainty that something is false is certainty."""
+        from escapement.evidence.models import Evidence, EvidenceKind
+
+        def monolith(action):
+            if action.id != "INSPECT_DEPENDENCY_MAP":
+                return scenario.perform(action)
+            return Evidence(
+                id="e_depmap",
+                kind=EvidenceKind.EXECUTION,
+                claim="1 monolithic module",
+                source="dependency_inspector",
+                produced_by="INSPECT_DEPENDENCY_MAP",
+                decisive=True,
+                payload={"module_count": 1},
+            )
+
+        self.assertEqual(len(run(perform=monolith).trace.of_type("EVIDENCE_ADDED")), 1)
 
     def test_a6_novel_mutation_swapping_evidence_changes_the_outcome(self) -> None:
         """Clause A6 requires a mutation not on the M1-M8 list.
