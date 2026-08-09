@@ -89,7 +89,6 @@ def run_episode(
     #: strategy name is what lets one observation strengthen one route
     #: while weakening another.
     strategy_belief_of: Callable[[str], tuple[tuple[str, int], ...]],
-    proceed_return: int,
     trace: EventTrace,
     max_rounds: int = 5,
 ) -> LoopResult:
@@ -170,7 +169,7 @@ def run_episode(
     # -- information rounds -----------------------------------------------
     last_evidence_seq: int | None = None
     last_belief_seq: int | None = None
-    comparator_used = proceed_return
+    comparator_used = 0
 
     for _round in range(max_rounds):
         # Criterion 3: several information actions compared, each scored.
@@ -205,8 +204,7 @@ def run_episode(
         # only as a floor so a caller can say "acting is never worth less
         # than this"; it can no longer dictate the stopping point.
         comparator = compute_proceed_return(
-            [int(b.label) for b in beliefs.of_kind("StrategyBelief")],
-            floor=proceed_return,
+            [int(b.label) for b in beliefs.of_kind("StrategyBelief")]
         )
         should_stop, comparator_used = stop_exploring(values, comparator=comparator)
         if should_stop:
@@ -215,7 +213,6 @@ def run_episode(
                 payload={
                     "comparator": comparator_used,
                     "comparator_source": "max strategy-belief ordinal (MVT opportunity cost)",
-                    "comparator_floor": proceed_return,
                     "best_evi": max((v.score for v in values), default=None),
                     "rule": "marginal-value-theorem",
                 },

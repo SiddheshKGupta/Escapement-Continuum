@@ -27,7 +27,6 @@ def main(out: Path | None = None) -> int:
         interpret=scenario.interpret,
         world_belief_of=scenario.world_belief_of,
         strategy_belief_of=scenario.strategy_belief_of,
-        proceed_return=scenario.PROCEED_RETURN,
         trace=trace,
     )
     print(f"committed: {result.commitment.strategy_id}")

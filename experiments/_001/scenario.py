@@ -262,7 +262,3 @@ def strategy_belief_of(world_belief_id: str) -> tuple[tuple[str, int], ...]:
     return ()
 
 
-#: The return of simply proceeding. Compared against EVI by the Marginal
-#: Value Theorem rule; exploration continues only while some action beats
-#: it.
-PROCEED_RETURN = 1

@@ -24,7 +24,6 @@ def run(**overrides):
         interpret=scenario.interpret,
         world_belief_of=scenario.world_belief_of,
         strategy_belief_of=scenario.strategy_belief_of,
-        proceed_return=scenario.PROCEED_RETURN,
         trace=EventTrace(episode_id="exp001"),
     )
     kwargs.update(overrides)

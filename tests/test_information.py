@@ -198,14 +198,22 @@ class ComputedComparatorTest(unittest.TestCase):
         self.assertEqual(proceed_return([2, 2, 2]), 2)
         self.assertEqual(proceed_return([4, 2, 0]), 4)
 
-    def test_comparator_is_not_merely_the_floor(self) -> None:
-        """If it echoed its input the way the old constant did, this
-        would return the floor rather than the belief-derived value."""
-        self.assertEqual(proceed_return([3], floor=0), 3)
+    def test_no_override_parameter_exists(self) -> None:
+        """The executable contract checker caught a configuration back
+        door within an hour of the comparator being made "computed": a
+        `floor=` parameter meant a caller could set floor=99 and force
+        immediate stopping, reintroducing exactly the control criterion 8
+        forbids. A computed comparator must not be
+        computed-unless-overridden."""
+        import inspect
 
-    def test_floor_applies_only_when_it_dominates(self) -> None:
-        self.assertEqual(proceed_return([1], floor=2), 2)
-        self.assertEqual(proceed_return([], floor=2), 2)
+        params = list(inspect.signature(proceed_return).parameters)
+        self.assertEqual(params, ["strategy_labels"])
+
+    def test_no_beliefs_means_acting_is_worth_nothing(self) -> None:
+        """Not a degenerate case: at the start of an episode nothing is
+        known, so acting is worth nothing and any information beats it."""
+        self.assertEqual(proceed_return([]), 0)
 
     def test_stronger_beliefs_stop_exploration_sooner(self) -> None:
         values = [InformationValue(action_id="a", expected_improvement=4, cost=1)]

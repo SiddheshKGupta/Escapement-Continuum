@@ -54,7 +54,7 @@ class InformationValue:
         return self.expected_improvement - self.cost
 
 
-def proceed_return(strategy_labels: list[int], *, floor: int = 0) -> int:
+def proceed_return(strategy_labels: list[int]) -> int:
     """The opportunity cost of continuing to investigate.
 
     This is the comparator the Marginal Value Theorem actually needs, and
@@ -80,10 +80,22 @@ def proceed_return(strategy_labels: list[int], *, floor: int = 0) -> int:
     ordinal. Foundations §12 defers anything needing empirical magnitudes
     until data exists, and a tuned float here would reintroduce the false
     precision the ordinal representation avoids.
+
+    **There is deliberately no floor or override parameter.** An earlier
+    version took `floor=` so a caller could say "acting is never worth
+    less than this". The executable contract checker caught it within an
+    hour: raising the floor made the comparator echo the floor verbatim,
+    which is a configuration back door that reintroduces exactly the
+    control criterion 8 forbids. If the comparator is to be computed,
+    it must be computed, not merely computed-unless-overridden.
+
+    With no beliefs yet the return is 0, which is the correct behaviour
+    rather than a degenerate case: at the start of an episode nothing is
+    known, so acting is worth nothing and any information beats it.
     """
     if not strategy_labels:
-        return floor
-    return max(floor, max(strategy_labels))
+        return 0
+    return max(strategy_labels)
 
 
 def stop_exploring(
