@@ -33,7 +33,12 @@ from escapement.belief.labels import BeliefLabel, Decisiveness, update
 from escapement.capabilities.models import Capability, validate_bindings
 from escapement.evidence.models import Evidence, Interpretation
 from escapement.information.action import InformationAction
-from escapement.information.value import InformationValue, best_action, stop_exploring
+from escapement.information.value import (
+    InformationValue,
+    best_action,
+    proceed_return as compute_proceed_return,
+    stop_exploring,
+)
 from escapement.jtms.core import JTMS
 from escapement.observation.events import EventTrace
 from escapement.state.models import Belief, BeliefState, Observation, ObservedState
@@ -105,10 +110,33 @@ def run_episode(
     beliefs = BeliefState()
     ensemble = StrategyEnsemble()
     jtms = JTMS()
+    # Maps a JTMS node id to the event that established it. Without this
+    # bridge `explain()` returns justifications that cannot be turned
+    # back into event sequence numbers, which is why caused_by was
+    # hand-attached and why two independent reviews found the JTMS
+    # decorative -- deleting every jtms call left the trace byte-identical.
+    node_seq: dict[str, int] = {}
+
+    def derive_causes(node_id: str, fallback: tuple[int, ...]) -> tuple[int, ...]:
+        """caused_by for a belief, read off the justification network.
+
+        Walks the live JTMS support chain and maps each antecedent back
+        to the event that established it. Falls back only when the node
+        has no recorded support, so a broken justification surfaces as a
+        different trace rather than being silently papered over.
+        """
+        support = jtms.support(node_id)
+        if support is None:
+            return fallback
+        derived = tuple(
+            node_seq[a] for a in support.in_list if a in node_seq
+        )
+        return derived or fallback
 
     opened = trace.emit("EPISODE_OPENED", payload={"episode_id": episode_id})
     declared = trace.emit(
         "INTENT_DECLARED",
+        caused_by=(opened.seq,),
         payload={
             "outcome": intent.outcome,
             "success_criteria": list(intent.success_criteria),
@@ -131,6 +159,7 @@ def run_episode(
         )
         trace.emit(
             "STRATEGY_GENERATED",
+            caused_by=(declared.seq,),
             payload={
                 "strategy_id": strategy.id,
                 "reversibility": strategy.reversibility.value,
@@ -153,6 +182,9 @@ def run_episode(
             values.append(value)
             event = trace.emit(
                 "INFORMATION_ACTION_EVALUATED",
+                caused_by=tuple(
+                    c for c in (last_belief_seq or declared.seq,) if c is not None
+                ),
                 payload={
                     "action_id": action.id,
                     "kind": action.kind.value,
@@ -168,12 +200,22 @@ def run_episode(
         # proceeding. Marginal Value Theorem, so the comparator is
         # computed rather than configured -- and recorded, or a constant
         # chosen after the fact would satisfy the criterion (clause A1).
-        should_stop, comparator_used = stop_exploring(values, proceed_return=proceed_return)
+        # Criterion 8: the comparator is derived from current belief
+        # state, not taken as configuration. `proceed_return` is retained
+        # only as a floor so a caller can say "acting is never worth less
+        # than this"; it can no longer dictate the stopping point.
+        comparator = compute_proceed_return(
+            [int(b.label) for b in beliefs.of_kind("StrategyBelief")],
+            floor=proceed_return,
+        )
+        should_stop, comparator_used = stop_exploring(values, comparator=comparator)
         if should_stop:
             trace.emit(
                 "EXPLORATION_STOPPED",
                 payload={
                     "comparator": comparator_used,
+                    "comparator_source": "max strategy-belief ordinal (MVT opportunity cost)",
+                    "comparator_floor": proceed_return,
                     "best_evi": max((v.score for v in values), default=None),
                     "rule": "marginal-value-theorem",
                 },
@@ -235,6 +277,7 @@ def run_episode(
             f"observed:{observation.id}",
             rationale=f"{subject} = {value} (evidence {evidence.id})",
         )
+        node_seq[f"observed:{observation.id}"] = observation_event.seq
 
         # Criterion 6: a world belief moves, caused by the observation,
         # *in the direction the evidence actually points*. The direction
@@ -258,6 +301,9 @@ def run_episode(
             in_list=[f"observed:{observation.id}"],
             rationale=f"{subject}={value!r} {direction_word} {after.proposition}",
         )
+        world_causes = derive_causes(
+            f"belief:{world_id}", (observation_event.seq,)
+        )
         world_event = trace.emit(
             "BELIEF_UPDATED",
             payload={
@@ -267,12 +313,13 @@ def run_episode(
                 "after": str(after.label),
                 "direction": interpretation.supports,
             },
-            caused_by=(observation_event.seq,),
+            caused_by=world_causes,
             rationale=(
                 f"observation {observation.id} ({subject}={value!r}) "
                 f"{direction_word} this proposition"
             ),
         )
+        node_seq[f"belief:{world_id}"] = world_event.seq
         last_belief_seq = world_event.seq
 
         # Criterion 7: strategy beliefs move, caused by the *world
@@ -299,7 +346,8 @@ def run_episode(
                 in_list=[f"belief:{world_id}"],
                 rationale=f"{world_id} {effect} confidence in {target_strategy}",
             )
-            last_belief_seq = trace.emit(
+            strategy_causes = derive_causes(sb_id, (world_event.seq,))
+            strategy_event = trace.emit(
                 "BELIEF_UPDATED",
                 payload={
                     "belief_id": sb_id,
@@ -309,13 +357,15 @@ def run_episode(
                     "after": str(sb_after.label),
                     "direction": step,
                 },
-                caused_by=(world_event.seq,),
+                caused_by=strategy_causes,
                 rationale=(
                     f"the world belief {world_id} moved "
                     f"{'up' if interpretation.supports > 0 else 'down'}, which "
                     f"{effect} how promising {target_strategy} is"
                 ),
-            ).seq
+            )
+            node_seq[sb_id] = strategy_event.seq
+            last_belief_seq = strategy_event.seq
 
     # -- ranking ----------------------------------------------------------
     # Sorted by belief then id: coarse labels make ties common, and
@@ -338,41 +388,86 @@ def run_episode(
     )
 
     # -- commitment -------------------------------------------------------
-    # Criterion 11: the runner-up is RETAINED, not eliminated. Anything
-    # ranked below it that is strictly weaker is eliminated *with a
-    # reason*, because criterion 13 needs every transition explainable.
+    # Criterion 11: retention is gated on plausibility, not on rank
+    # position. An independent re-score found that the D1 fix made
+    # RULED_OUT reachable for the first time while `rest[0].retain()`
+    # kept retaining the runner-up unconditionally -- so a commitment
+    # could present a ruled-out strategy as a live alternative. That is
+    # the opposite of what criterion 11 asks for, and it was a
+    # regression introduced by making beliefs able to fall.
     winner, *rest = ranked
     ensemble.add(winner.commit())
-    if rest:
-        ensemble.add(rest[0].retain())
-    for loser in rest[1:]:
-        ensemble.add(
-            loser.eliminate(
-                f"belief {beliefs.get(f'belief:strategy:{loser.id}').label} is below "
-                f"the retained alternative {rest[0].id}"
-            )
-        )
 
-    residual = tuple(
+    def _label(strategy: Strategy) -> BeliefLabel:
+        return beliefs.get(f"belief:strategy:{strategy.id}").label
+
+    still_viable = [s for s in rest if _label(s) is not BeliefLabel.RULED_OUT]
+    for candidate in rest:
+        if candidate in still_viable:
+            ensemble.add(candidate.retain())
+        else:
+            ensemble.add(
+                candidate.eliminate(
+                    f"belief reached {_label(candidate)}; not a material alternative"
+                )
+            )
+
+    # Criterion 10: residual uncertainty must be true of *this* trace.
+    # The previous implementation filtered world beliefs below
+    # ESTABLISHED and, when that came out empty, substituted the literal
+    # "no world belief reached ESTABLISHED" -- a statement the same trace
+    # contradicted, and an assertion over an empty set, which clause A2
+    # scores FAIL. Both sources below are read from actual state.
+    residual: list[str] = [
         f"{b.proposition} is only {b.label}"
         for b in sorted(beliefs.of_kind("WorldBelief"), key=lambda b: b.id)
-        if b.label is not BeliefLabel.ESTABLISHED
-    ) or ("no world belief reached ESTABLISHED",)
+        if b.label not in (BeliefLabel.ESTABLISHED, BeliefLabel.RULED_OUT)
+    ]
+    residual += [
+        f"{s.id} remains viable at {_label(s)} and was not ruled out"
+        for s in sorted(still_viable, key=lambda s: s.id)
+    ]
+
+    # Criterion 9: the rationale is built from what actually happened.
+    # It was an unconditional f-string claiming information was
+    # exhausted even when zero information actions had been evaluated.
+    stopped_event = trace.first("EXPLORATION_STOPPED")
+    if stopped_event is not None:
+        why_now = (
+            f"further information is uneconomic (best EVI "
+            f"{stopped_event.payload['best_evi']} did not exceed the computed "
+            f"comparator {stopped_event.payload['comparator']})"
+        )
+    elif not trace.of_type("INFORMATION_ACTION_EVALUATED"):
+        why_now = "no information action was evaluated, so no information value remains to weigh"
+    else:
+        why_now = (
+            "the information budget was exhausted before exploration "
+            "converged, so residual uncertainty is carried into the commitment"
+        )
 
     commitment = Commitment.of(
         chosen=ensemble.get(winner.id),
         ensemble=ensemble,
         rationale=(
-            f"further information is uneconomic (best EVI below the "
-            f"comparator {comparator_used}), and the next action "
+            f"{why_now}, and the next action "
             f"({winner.next_action or 'execution'}) requires a stable choice"
         ),
-        residual_uncertainty=residual,
+        residual_uncertainty=tuple(residual),
     )
+    # Criterion 13: cite the event that established the first half of the
+    # rationale. Previously the commitment asserted information was
+    # exhausted without any causal edge to EXPLORATION_STOPPED.
     commit_causes = tuple(
-        c for c in (ranked_event.seq, last_evidence_seq) if c is not None
+        c
+        for c in (
+            ranked_event.seq,
+            stopped_event.seq if stopped_event else None,
+            last_evidence_seq,
+        )
+        if c is not None
     )
-    trace.emit(
+    commit_event = trace.emit(
         "STRATEGY_COMMITTED",
         payload={
             "strategy_id": commitment.strategy_id,
@@ -383,7 +478,33 @@ def run_episode(
         caused_by=commit_causes,
         rationale=commitment.rationale,
     )
-    trace.emit("EPISODE_CLOSED", payload={"episode_id": episode_id})
+    # Contract section 2 lists both of these as required event types for
+    # Experiment 001. Both were declared in EVENT_TYPES and never emitted
+    # -- the episode simply ended at commitment. Experiment 001 does not
+    # execute the committed strategy (contract section 1 excludes it), so
+    # they record that fact honestly rather than claiming work was done.
+    execution = trace.emit(
+        "EXECUTION_COMPLETED",
+        payload={
+            "strategy_id": commitment.strategy_id,
+            "executed": False,
+            "reason": "Experiment 001 scores the decision path; execution is out of scope",
+        },
+        caused_by=(commit_event.seq,),
+    )
+    verification = trace.emit(
+        "VERIFICATION_COMPLETED",
+        payload={
+            "verified": False,
+            "reason": "nothing was executed, so there is no outcome to verify",
+        },
+        caused_by=(execution.seq,),
+    )
+    trace.emit(
+        "EPISODE_CLOSED",
+        payload={"episode_id": episode_id},
+        caused_by=(verification.seq,),
+    )
 
     return LoopResult(
         commitment=commitment,

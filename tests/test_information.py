@@ -5,7 +5,12 @@ import unittest
 from escapement.capabilities.models import Capability, CapabilityKind, validate_bindings
 from escapement.evidence.models import Evidence, EvidenceKind
 from escapement.information.action import ActionKind, InformationAction
-from escapement.information.value import InformationValue, best_action, stop_exploring
+from escapement.information.value import (
+    InformationValue,
+    best_action,
+    proceed_return,
+    stop_exploring,
+)
 from escapement.state.models import Observation
 from escapement.strategy.models import Reversibility
 
@@ -154,13 +159,13 @@ class StoppingRuleTest(unittest.TestCase):
 
     def test_keeps_exploring_while_information_beats_proceeding(self) -> None:
         values = [InformationValue(action_id="a", expected_improvement=5, cost=1)]
-        should_stop, comparator = stop_exploring(values, proceed_return=2)
+        should_stop, comparator = stop_exploring(values, comparator=2)
         self.assertFalse(should_stop)
         self.assertEqual(comparator, 2)
 
     def test_stops_once_information_is_worth_less_than_proceeding(self) -> None:
         values = [InformationValue(action_id="a", expected_improvement=2, cost=1)]
-        should_stop, comparator = stop_exploring(values, proceed_return=3)
+        should_stop, comparator = stop_exploring(values, comparator=3)
         self.assertTrue(should_stop)
         self.assertEqual(comparator, 3)
 
@@ -168,13 +173,43 @@ class StoppingRuleTest(unittest.TestCase):
         """Criterion 8 requires EXPLORATION_STOPPED to carry the value
         actually used; otherwise a constant picked after the fact would
         satisfy the criterion, which is clause A1."""
-        _, comparator = stop_exploring([], proceed_return=7)
+        _, comparator = stop_exploring([], comparator=7)
         self.assertEqual(comparator, 7)
 
     def test_exhausted_action_set_stops(self) -> None:
-        should_stop, _ = stop_exploring([], proceed_return=0)
+        should_stop, _ = stop_exploring([], comparator=0)
         self.assertTrue(should_stop)
 
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ComputedComparatorTest(unittest.TestCase):
+    """Criterion 8 failed two independent reviews because the comparator
+    was a module constant echoed straight back: setting it to -3, 0, 3 or
+    99 changed the recorded value verbatim, so any stopping behaviour
+    could be produced after the fact. It must be derived from state."""
+
+    def test_comparator_rises_with_the_best_strategy_belief(self) -> None:
+        """Acting on an ESTABLISHED belief is worth more than acting on a
+        PLAUSIBLE one, so the bar for further inspection rises with
+        confidence and exploration stops sooner."""
+        self.assertEqual(proceed_return([2, 2, 2]), 2)
+        self.assertEqual(proceed_return([4, 2, 0]), 4)
+
+    def test_comparator_is_not_merely_the_floor(self) -> None:
+        """If it echoed its input the way the old constant did, this
+        would return the floor rather than the belief-derived value."""
+        self.assertEqual(proceed_return([3], floor=0), 3)
+
+    def test_floor_applies_only_when_it_dominates(self) -> None:
+        self.assertEqual(proceed_return([1], floor=2), 2)
+        self.assertEqual(proceed_return([], floor=2), 2)
+
+    def test_stronger_beliefs_stop_exploration_sooner(self) -> None:
+        values = [InformationValue(action_id="a", expected_improvement=4, cost=1)]
+        weak, _ = stop_exploring(values, comparator=proceed_return([2]))
+        strong, _ = stop_exploring(values, comparator=proceed_return([4]))
+        self.assertFalse(weak)   # EVI 3 > 2, keep looking
+        self.assertTrue(strong)  # EVI 3 <= 4, act on what we know

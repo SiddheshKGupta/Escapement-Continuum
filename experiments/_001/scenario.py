@@ -123,6 +123,7 @@ _EVIDENCE = {
         claim="the repository contains 812 files",
         source="repo_sizer",
         produced_by="INSPECT_REPO_SIZE",
+        payload={"file_count": 812},
     ),
     "ASK_ARCHITECT": Evidence(
         id="e_architect",
@@ -181,26 +182,57 @@ MODULARITY_THRESHOLD = 3
 def interpret(evidence: Evidence) -> Interpretation:
     """Turn evidence into a fact *and* a direction.
 
-    The direction is computed from the observed value. This is the half
-    of the fix that makes evidence content load-bearing: a dependency map
-    reporting one monolithic module now yields supports=-1 and drives the
-    modularity belief down, where previously every observation moved it
-    up regardless of what it said.
+    The direction is computed from the observed value, which is what
+    makes evidence content load-bearing: a dependency map reporting one
+    monolithic module yields supports=-1 and drives the modularity belief
+    down.
+
+    Two defects an independent review found here, both now closed:
+
+    - The payload lookups defaulted to the fixture's ground truth, so
+      evidence carrying *no* payload ("the map could not be read") was
+      silently interpreted as evidence for the true answer. Evidence that
+      says nothing must not be readable as evidence that says something.
+    - There was no final `else`, so any unrecognised evidence id fell
+      through to the architect branch. Evidence about CI runtime was
+      admitted as an observation that an architect had said "modular",
+      with a valid-looking causal link. That is a fabricated observation,
+      and it is exactly what an MCP consumer reading the trace would have
+      believed.
+
+    Both are now hard failures. An interpreter that cannot interpret
+    something should say so, not guess.
     """
     if evidence.id == "e_depmap":
-        modules = evidence.payload.get("module_count", _TRUTH_MODULE_COUNT)
+        if "module_count" not in evidence.payload:
+            raise ValueError(
+                f"evidence {evidence.id} carries no module_count; it cannot be "
+                "interpreted as a statement about modularity"
+            )
+        modules = evidence.payload["module_count"]
         return Interpretation(
             subject="module_count",
             value=modules,
             supports=1 if modules > MODULARITY_THRESHOLD else -1,
         )
     if evidence.id == "e_size":
-        return Interpretation(subject="file_count", value=812, supports=1)
-    opinion = evidence.payload.get("opinion", "modular")
-    return Interpretation(
-        subject="architect_opinion",
-        value=opinion,
-        supports=1 if opinion == "modular" else -1,
+        if "file_count" not in evidence.payload:
+            raise ValueError(f"evidence {evidence.id} carries no file_count")
+        return Interpretation(
+            subject="file_count", value=evidence.payload["file_count"], supports=1
+        )
+    if evidence.id == "e_architect":
+        if "opinion" not in evidence.payload:
+            raise ValueError(f"evidence {evidence.id} carries no opinion")
+        opinion = evidence.payload["opinion"]
+        return Interpretation(
+            subject="architect_opinion",
+            value=opinion,
+            supports=1 if opinion == "modular" else -1,
+        )
+    raise ValueError(
+        f"no interpretation rule for evidence {evidence.id!r} "
+        f"(kind {evidence.kind.value}); refusing to guess a subject"
     )
 
 

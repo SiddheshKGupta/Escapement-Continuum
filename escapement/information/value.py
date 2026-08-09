@@ -54,8 +54,40 @@ class InformationValue:
         return self.expected_improvement - self.cost
 
 
+def proceed_return(strategy_labels: list[int], *, floor: int = 0) -> int:
+    """The opportunity cost of continuing to investigate.
+
+    This is the comparator the Marginal Value Theorem actually needs, and
+    it must be *computed from state*. An independent review failed
+    criterion 8 twice because the previous version took a module constant
+    (`PROCEED_RETURN = 1`) and echoed it straight back: setting it to -3,
+    0, 3 or 99 changed the recorded comparator verbatim, so a number
+    chosen after the fact could produce any stopping behaviour desired.
+    That is exactly the "fixed constant" the contract's v1.1 amendment
+    forbids and clause A1 calls vacuous.
+
+    The quantity being estimated is: how much is it worth to stop
+    investigating and act on what we already believe? Under MVT you leave
+    a patch when its marginal yield drops to the *habitat average* -- here,
+    the value of getting on with the work. That value rises as the best
+    strategy becomes better supported: acting on an ESTABLISHED belief is
+    worth more than acting on a PLAUSIBLE one, so the bar for further
+    inspection rises with confidence and the loop stops sooner. When
+    nothing is known the bar is low and exploration continues, which is
+    the behaviour the rule is supposed to produce.
+
+    Coarse by construction: the return is the top strategy's label
+    ordinal. Foundations §12 defers anything needing empirical magnitudes
+    until data exists, and a tuned float here would reintroduce the false
+    precision the ordinal representation avoids.
+    """
+    if not strategy_labels:
+        return floor
+    return max(floor, max(strategy_labels))
+
+
 def stop_exploring(
-    values: list[InformationValue], *, proceed_return: int
+    values: list[InformationValue], *, comparator: int
 ) -> tuple[bool, int]:
     """Marginal Value Theorem stopping rule.
 
@@ -65,17 +97,18 @@ def stop_exploring(
     its marginal return rate falls to the habitat average -- not when the
     patch is empty. Transposed here, stop investigating when the best
     remaining information action yields less than simply getting on with
-    the work. That is a materially different rule from "EVI below a fixed
-    constant", because the bar is the opportunity cost of the alternative
-    rather than an arbitrary number.
+    the work.
 
-    The comparator is returned, not just consulted, because criterion 8
-    requires `EXPLORATION_STOPPED` to record the value actually used.
+    The comparator is passed in rather than defaulted, and returned rather
+    than merely consulted, because criterion 8 requires
+    `EXPLORATION_STOPPED` to record the value actually used. Callers are
+    expected to derive it from `proceed_return()` -- passing a literal is
+    possible but is the defect this signature was reshaped to expose.
     """
     if not values:
-        return True, proceed_return
+        return True, comparator
     best = max(value.score for value in values)
-    return best <= proceed_return, proceed_return
+    return best <= comparator, comparator
 
 
 def best_action(values: list[InformationValue]) -> InformationValue | None:

@@ -161,21 +161,83 @@ class CriteriaTest(unittest.TestCase):
     def test_c14_run_is_deterministic(self) -> None:
         self.assertEqual(run().trace.render(), run().trace.render())
 
-    def test_c15_trace_replays_to_the_same_commitment(self) -> None:
+    def test_c15_trace_replays_to_the_same_commitment_and_beliefs(self) -> None:
+        """Replay must reconstruct state from the event stream alone.
+
+        The previous version of this test wrote a trace, read it back,
+        and compared the parsed strings against the live in-memory
+        objects of the same run. Reading a file returns what you wrote,
+        so it could not fail -- clause A1. It tested the writer.
+
+        This uses `replay()`, which imports no scenario and cannot reach
+        `perform()`, so it genuinely rebuilds belief state from events.
+        """
+        from escapement.observation.replay import replay
+
         path = Path(__file__).parent / "_replay.jsonl"
         try:
-            trace = EventTrace(episode_id="exp001", path=path)
-            live = run(trace=trace)
-            replayed = load(path)
-            commit = next(e for e in replayed if e.type == "STRATEGY_COMMITTED")
-            self.assertEqual(commit.payload["strategy_id"], live.commitment.strategy_id)
-            beliefs = [e for e in replayed if e.type == "BELIEF_UPDATED"]
+            live = run(trace=EventTrace(episode_id="exp001", path=path))
+            episode = replay(load(path))
+
+            self.assertTrue(episode.is_complete)
+            self.assertEqual(episode.committed_strategy, live.commitment.strategy_id)
             self.assertEqual(
-                beliefs[-1].payload["after"],
-                str(live.beliefs.get(beliefs[-1].payload["belief_id"]).label),
+                episode.retained_alternatives, live.commitment.retained_alternatives
             )
+            self.assertEqual(
+                episode.residual_uncertainty, live.commitment.residual_uncertainty
+            )
+
+            # Every belief the live run holds must be reconstructable.
+            for belief_id, belief in live.beliefs.beliefs.items():
+                self.assertIn(belief_id, episode.beliefs)
+                self.assertIs(
+                    episode.beliefs[belief_id],
+                    belief.label,
+                    f"{belief_id} replayed as {episode.beliefs[belief_id]} "
+                    f"but live state holds {belief.label}",
+                )
         finally:
             path.unlink(missing_ok=True)
+
+    def test_replay_rejects_a_trace_that_contradicts_itself(self) -> None:
+        """A replay that silently repaired inconsistencies would defeat
+        the point of having one."""
+        from escapement.observation.events import Event
+        from escapement.observation.replay import ReplayError, replay
+
+        contradictory = [
+            Event(seq=1, type="EPISODE_OPENED", episode_id="t", payload={"episode_id": "t"}),
+            Event(
+                seq=2,
+                type="STRATEGY_GENERATED",
+                episode_id="t",
+                payload={"strategy_id": "A", "belief": "PLAUSIBLE"},
+            ),
+            Event(
+                seq=3,
+                type="BELIEF_UPDATED",
+                episode_id="t",
+                # claims A was RULED_OUT, but seq 2 established PLAUSIBLE
+                payload={
+                    "belief_id": "belief:strategy:A",
+                    "kind": "StrategyBelief",
+                    "before": "RULED_OUT",
+                    "after": "UNLIKELY",
+                },
+                caused_by=(2,),
+                rationale="r",
+            ),
+        ]
+        with self.assertRaises(ReplayError):
+            replay(contradictory)
+
+    def test_replay_rejects_a_trace_with_seq_gaps(self) -> None:
+        from escapement.observation.events import Event
+        from escapement.observation.replay import ReplayError, replay
+
+        with self.assertRaises(ReplayError):
+            replay([Event(seq=5, type="EPISODE_OPENED", episode_id="t")])
 
 
 class MutationTest(unittest.TestCase):
