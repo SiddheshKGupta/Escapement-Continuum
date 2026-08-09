@@ -172,19 +172,44 @@ class SeededJournalTest(unittest.TestCase):
         self.assertGreaterEqual(len(self.entries), 8)
 
     def test_every_seed_entry_is_marked_retrospective(self) -> None:
-        """They predate the journal, so none may count toward calibration."""
-        for entry_id, e in self.entries.items():
-            self.assertTrue(e.retrospective, f"{entry_id} is not marked retrospective")
+        """The seeded entries predate the journal, so none may count
+        toward calibration.
 
-    def test_every_prediction_is_forward_looking_and_open(self) -> None:
+        Scoped to the seed ids rather than to every entry in the file.
+        An earlier version of this test asserted the whole journal was
+        retrospective, which was true the day it was written and became
+        wrong the moment a real decision was recorded -- the journal
+        exists precisely to accumulate non-retrospective entries. That is
+        a test encoding a snapshot as an invariant, and it broke on the
+        first genuine use.
+        """
+        from journal.seed import ENTRIES as SEED
+
+        for seeded in SEED:
+            entry = self.entries[seeded.id]
+            self.assertTrue(entry.retrospective, f"{seeded.id} is not marked retrospective")
+
+    def test_seed_predictions_are_forward_looking_and_open(self) -> None:
         """A retrospective entry graded on hindsight would be worthless;
-        these are all about rework that has not happened yet."""
-        for entry_id, e in self.entries.items():
+        the seeded ones are all about rework that has not happened yet."""
+        from journal.seed import ENTRIES as SEED
+
+        for seeded in SEED:
             self.assertIs(
-                e.prediction.resolution,
+                self.entries[seeded.id].prediction.resolution,
                 Resolution.UNRESOLVED,
-                f"{entry_id} was seeded already resolved",
+                f"{seeded.id} was seeded already resolved",
             )
+
+    def test_journal_accepts_non_retrospective_entries(self) -> None:
+        """The point of the journal. If every entry were retrospective it
+        would never produce a scoreable prediction."""
+        real = [e for e in self.entries.values() if not e.retrospective]
+        self.assertTrue(
+            real,
+            "no non-retrospective entries recorded yet; the journal cannot "
+            "calibrate on hindsight alone",
+        )
 
     def test_the_seeded_journal_reports_no_signal(self) -> None:
         result = report(list(self.entries.values()))
