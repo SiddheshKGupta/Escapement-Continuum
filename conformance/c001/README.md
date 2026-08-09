@@ -1,6 +1,6 @@
 # Experiment 001: Useful Uncertainty
 
-Run: `python experiments/_001/run.py`
+Run: `python conformance/c001/run.py`
 
 ## Determinism allow-list (criterion 14)
 

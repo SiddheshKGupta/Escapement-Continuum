@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from escapement.loop import run_episode
 from escapement.observation.events import EventTrace
 
-from experiments._001 import scenario
+from conformance.c001 import scenario
 
 
 def main(out: Path | None = None) -> int:

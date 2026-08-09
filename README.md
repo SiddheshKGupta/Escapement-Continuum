@@ -1,162 +1,153 @@
 # Escapement-Continuum
 
-**A research line exploring whether adaptive, uncertainty-aware execution
-can outperform fixed routing for AI-assisted delivery.**
+**A research programme investigating whether AI execution problems exist
+that a strong, simple harness cannot already solve.**
 
-`0.1.0-alpha` · research → experimental → validated · **nothing here is
-validated yet**
+```text
+Research status        OPEN   (Phase II)
+Architecture status    FROZEN / NOT VALIDATED
+Distinguishing claim   NONE ESTABLISHED
+v2 status              NOT CLAIMED — must be re-earned
+```
 
 ---
 
-## Status, stated plainly
+## Read this first
 
-This repository has **not** demonstrated its thesis. It has one
-experiment, on a fixture, which has been independently scored twice and
-**failed both times**.
+Continuum **is not a system**. It is not v2, and it does not currently
+have a distinguishing architecture. Phase I explored one and concluded
+that its central claims did not survive adversarial specification.
 
-```text
-Experiment 001   FAIL (9/15)   second independent scoring
-                 fixes applied for all six failing criteria
-                 NOT yet re-scored -- a third review is required
-                 before any claim of passing
-```
-
-The machinery is real and tested (125 tests). What is missing is
-evidence that the machinery helps. Those are different things, and this
-README will not blur them.
+That is a negative result, and it is the main output of this repository
+so far.
 
 **This is not a successor to [Escapement v1](https://github.com/SiddheshKGupta/Escapement).**
-v1 is the stable line, is not deprecated, and is not waiting to be
-replaced. Nothing here is a reason to delay adopting or continuing to
-use it. Within Continuum's own capability model, v1 is catalogued as a
-`HARNESS` capability — prior art to measure against, not a legacy to
-migrate away from.
+v1 is the stable line. It is not deprecated, not superseded, and nothing
+here is a reason to defer adopting it.
 
 ---
 
-## What "Continuum" means
+## Phase I — concluded
 
-**The continuum is the retained strategy space, not the belief scale.**
-
-That distinction matters enough to state on the first screen. Beliefs
-here are deliberately *discrete* — five ordered labels, no floats —
-because a point probability cannot distinguish uncertainty from
-ignorance. `P = 0.5` asserts "equally likely", which is a strong claim,
-not an absence of information.
-
-What is continuous is optionality: multiple strategies are held
-simultaneously and commitment is delayed until further information stops
-being worth its cost.
-
-The line was previously called *Quantum Escapement*. It was renamed
-because the metaphor caused engineering errors, not merely marketing
-confusion — classical probabilities cannot interfere, so "interference"
-invited amplitude arithmetic that would have produced negative
-probabilities. See `QUANTUM_ESCAPEMENT_FORMAL_FOUNDATIONS_v1.0.md` §10.
-
----
-
-## The idea
+Three candidate answers to "what is Continuum" were removed, each by
+strengthening the baseline it was compared against:
 
 ```text
-INTENT
-  -> observed state + belief state
-  -> strategy ensemble            several routes held at once
-  -> is uncertainty worth reducing?
-       yes -> information action -> evidence -> update beliefs
-       no  -> commitment required? -> policy gate -> action
-  -> evidence -> new state -> repeat
+delayed commitment              ✕  a strong router reproduces it
+strategy ensemble               ✕  no distinct capability
+retained-alternative recovery   ✕  reduces to persistence + reconstruction
 ```
 
-The loop owns the reasoning. **Models are capabilities inside it, not the
-brain.** Nothing in `run_episode()` asks a model when to stop gathering
-information or when to commit — the loop decides, and behaves identically
-with a human, a tool, or a harness supplying evidence.
+The reduction, in full:
 
-Underneath, the honest formal frame is a POMDP whose action set is
-heterogeneous capabilities. Solving POMDPs optimally is intractable,
-which is *why* the estimates here are coarse — not a shortcut to be
-replaced later.
+```text
+delayed commitment              -> a strong router can gather before routing
+strategy ensemble               -> a strong router can persist alternatives
+retained-alternative recovery   -> a strong router can persist rationale
+dependency-aware recovery       -> a strong router can persist a dep graph
+selective revalidation          -> a strong router can run the same algorithm
+remaining difference            -> incremental maintenance vs reconstruction
+                                -> a generic incremental-computation trade-off
+```
+
+**Nothing was empirically falsified.** Once the strongest fair
+comparator was specified, there was no treatment left to test. The
+planned 180-run experiment was cancelled *before execution* rather than
+run, disliked and rationalised — see
+`EXPERIMENT_002_CANCELLATION_ADDENDUM.md`.
+
+## Phase II — open
+
+> Discover whether an execution problem exists for which a mechanism
+> materially stronger than **v1 + the smallest reasonable enhancement**
+> is required.
+
+Governed by three rules, all of which Phase I earned the hard way:
+
+- **Admission rule** — a mechanism enters only if a defined problem
+  exists, the simplest v1 enhancement was considered and has a *specific*
+  insufficiency, the mechanism yields an observable distinction rather
+  than a new representation, and that distinction survives adversarial
+  specification *before* implementation.
+- **Comparator rule** — always compare against v1 *plus the smallest
+  reasonable enhancement*, never frozen historical v1. Comparing against
+  a system denied an obvious improvement lets any mechanism manufacture
+  its own necessity.
+- **Simplicity rule** — complexity is not evidence of distinction. **The
+  simpler architecture wins ties.**
+
+Phase II has a **six-cycle budget** and closes if no problem reaches
+`WORTH_EXPERIMENT`. Closing is a legitimate outcome.
+
+Open problems and their triage: `CONTINUUM_OPEN_PROBLEMS.md`.
 
 ---
 
-## Try it
+## C001 — conformance suite
 
-```bash
-python experiments/_001/run.py          # writes experiments/_001/events.jsonl
-python -m unittest discover -s tests    # 125 tests
+What was called "Experiment 001" is a **deterministic conformance
+test**, not scientific evidence. It was reclassified because a fixture
+whose inputs, thresholds and expected output were all authored by the
+implementer cannot produce information about the world — a PASS would
+confirm only that we can implement our own specification.
+
+Its diagnostic value is real and high. Three independent scorings found
+defects that its author's own tests and checker missed:
+
+```text
+review 1   the committed strategy was invariant to what the evidence said
+review 2   a regression, plus two "fixes" that were structurally inert
+review 3   the author's own checker passed the defect it was built to catch
 ```
 
-No network, no model provider, no MCP, no API key. Standard library
-only. Experiment 001 is deterministic by contract — two runs produce
-byte-identical traces.
-
-The decision journal:
+C001 currently **FAILS** criteria 8 and 10 on anti-gaming grounds. The
+full FAIL history is preserved deliberately and is not sanitised.
 
 ```bash
-python -m escapement.journal --path journal/decisions.jsonl list
-python -m escapement.journal --path journal/decisions.jsonl report
+python conformance/c001/run.py           # writes conformance/c001/events.jsonl
+python -m scoring.independent_checks     # independently written checker
+python -m unittest discover -s tests     # 125 tests
 ```
+
+No network, no model provider, no MCP, no API key. Standard library only.
 
 ---
 
 ## Layout
 
 ```text
-escapement/
-  intent/ state/ capabilities/ policy/ strategy/ evidence/   six primitives
-  information/       information actions, EVI, MVT stopping rule
-  belief/            five ordered labels; no floats
-  jtms/              justification-based truth maintenance
-  observation/       append-only event trace, replay
-  commitment/        (reserved; Commitment currently lives in strategy/)
-  loop.py            the canonical execution loop
-
-experiments/_001/    Useful Uncertainty
-journal/             decision journal + calibration
+escapement/          reference implementation (FROZEN, not validated)
+conformance/c001/    deterministic conformance suite
+scoring/             independently written contract checker
+journal/             decision journal
+tests/               125 tests
 ```
 
----
+## Documents
 
-## How this is reviewed
-
-Every mechanism must survive an experiment that could falsify it, and
-**nothing self-authored is accepted on its author's word.**
-
-That rule was earned. Across this project, independent review has three
-times found real defects in work that passed its own author's tests —
-including a case where the committed strategy was invariant to what the
-evidence said, and a claim in a docstring that was simply false. Each
-scoring cycle produced findings the author had missed.
-
-The acceptance criteria are written **before** implementation and cannot
-be retrofitted. They include anti-gaming clauses: an assertion that
-cannot fail does not count, an empty collection is not evidence, and a
-correct outcome with an undemonstrated path is a failure, not a pass.
-
+- `CONTINUUM_OPEN_PROBLEMS.md` — Phase II agenda and governing rules
+- `R0_PRESSURE_TEST.md` — how the last candidate distinction collapsed
+- `EXPERIMENT_002_CANCELLATION_ADDENDUM.md` — why 002 was cancelled
 - `QUANTUM_EXPERIMENT_001_REVIEW_CONTRACT_v1.0.md` — binding criteria
-- `QUANTUM_ESCAPEMENT_FORMAL_FOUNDATIONS_v1.0.md` — which formalism
-  solves which problem, and what was deliberately *not* borrowed
-- `EXPERIMENT_002_PREREGISTRATION_v1.0.md` — including what counts as a
-  null result, committed before any data exists
-- [`ROADMAP.md`](ROADMAP.md) — sequencing, and why self-hosting is scoped
-  to a decision journal rather than literal self-execution
+- `QUANTUM_ESCAPEMENT_FORMAL_FOUNDATIONS_v1.0.md` — which formalisms were
+  borrowed, and which were deliberately refused
 
 ---
 
 ## What this does not claim
 
 - That it beats Escapement v1. No comparison has been run.
-- That adaptive strategy selection works. Experiment 002 tests that, and
-  has not been run.
-- That Experiment 001 passes. It does not, yet.
-- That any of it is production-ready. It is `0.1.0-alpha` research.
-- Any connection to quantum computing. The implementation is entirely
-  classical.
+- That delayed commitment, strategy ensembles or retained alternatives
+  confer any advantage. Each was examined and none survived.
+- That C001 passes. It does not.
+- That it is production-ready. It is a frozen research artifact.
+- Any connection to quantum computing. Entirely classical. The line was
+  renamed from *Quantum Escapement* because the metaphor caused
+  engineering errors, not merely marketing confusion.
 
----
+## On the name
 
-## Licence
-
-See [LICENSE](LICENSE) if present; otherwise all rights reserved pending
-a licence decision.
+"Continuum" no longer denotes a continuous belief system. It names the
+continuum between evidence, uncertainty, decision and execution. If
+Phase II concludes no separate architecture is warranted, Continuum
+remains the name of the programme that established it.

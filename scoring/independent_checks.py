@@ -1984,7 +1984,7 @@ def _run_in_subprocess(out: Path, seed: str) -> tuple[int, str]:
     code = (
         "import sys; sys.path.insert(0, r'''%s''')\n"
         "from pathlib import Path\n"
-        "from experiments._001.run import main\n"
+        "from conformance.c001.run import main\n"
         "main(Path(r'''%s'''))\n" % (_REPO_ROOT, out)
     )
     env = dict(os.environ)
@@ -2292,7 +2292,7 @@ def _probe_replay() -> list[CheckResult]:
     """
     from escapement.loop import run_episode
     from escapement.observation.replay import replay
-    from experiments._001 import scenario
+    from conformance.c001 import scenario
 
     calls: list[str] = []
 
@@ -2387,7 +2387,7 @@ def _probe_p7_no_network() -> list[CheckResult]:
     import socket
 
     from escapement.loop import run_episode
-    from experiments._001 import scenario
+    from conformance.c001 import scenario
 
     opened: list[str] = []
     real_socket = socket.socket

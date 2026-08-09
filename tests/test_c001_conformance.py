@@ -9,7 +9,7 @@ from escapement.loop import run_episode
 from escapement.observation.events import EventTrace, load
 from escapement.strategy.models import CandidateStatus
 
-from experiments._001 import scenario
+from conformance.c001 import scenario
 
 
 def run(**overrides):
