@@ -20,8 +20,11 @@ There is no roadmap now, because Continuum has no architecture to build
 toward. Producing one would be the sunk-cost error the programme
 explicitly rejects.
 
-**Current agenda:** [`CONTINUUM_OPEN_PROBLEMS.md`](CONTINUUM_OPEN_PROBLEMS.md)
-— a problem list under a six-cycle budget, not a build plan.
+**Current agenda:** none. The programme is FROZEN — see the README.
+The Phase II problem list is preserved at
+[`docs/CONTINUUM_OPEN_PROBLEMS.md`](docs/CONTINUUM_OPEN_PROBLEMS.md);
+it reopens only when Escapement Core meets a concrete problem that
+deterministic mechanisms handle badly.
 
 ---
 
